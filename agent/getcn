@@ -1,0 +1,32 @@
+#!/usr/bin/env escript
+%% -*- erlang -*-
+%%! -noinput +B
+-mode(compile).
+-define(LDAP_HOST, "172.16.32.2").
+-define(BASE_DN, "ou=user,dc=example,dc=com").
+
+main([Field, Uid]) ->
+    {ok, Handle} = eldap:open([?LDAP_HOST]),
+    [begin
+         io:format("~s~n", [V])
+     end || V <- cn_find(Handle, Uid, Field)],    
+    eldap:close(Handle).
+
+cn_find(Handle, Uid, Field) ->
+    Filter = eldap:'and'([eldap:equalityMatch("objectClass", "PosixAccount"), eldap:equalityMatch("uid", Uid)]),
+    {ok,{eldap_search_result,Entries,[]}} = eldap:search(Handle, [{base, ?BASE_DN}, {filter, Filter}, {attributes, ["cn"]}]),
+    %% io:format("~p~n", [Entries]),
+    case Entries of
+        [{eldap_entry,_,[{"cn", Vs}]}] ->
+            Len = length(Field),
+            lists:foldl(fun(V, Acc) ->
+                                case lists:prefix(Field, V) of
+                                    true ->
+                                        [lists:nthtail(Len+1, V)|Acc];
+                                    false ->
+                                        Acc
+                                end
+                        end, [], Vs);
+        _ ->
+            []
+    end.

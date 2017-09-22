@@ -1,0 +1,12 @@
+#!/bin/bash
+start_slapd() {
+    local pid=$(pgrep slapd)
+    if [[ $pid = "" ]]; then
+        echo "starting"
+        /opt/ldap/libexec/slapd -f /opt/ldap/etc/openldap/slapd.conf
+    else
+        echo "slapd running"
+    fi    
+}
+
+start_slapd

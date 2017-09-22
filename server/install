@@ -1,0 +1,6 @@
+#!/bin/bash
+wget -c ftp://ftp.openldap.org/pub/OpenLDAP/openldap-release/openldap-2.4.45.tgz
+tar zxvf openldap-2.4.45.tgz
+apt-get install libdb-dev ## 依赖安装
+cd openldap-2.4.45
+./configure --prefix=/opt/ldap && make depend && make && make install

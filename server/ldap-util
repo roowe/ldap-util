@@ -1,0 +1,177 @@
+#!/usr/bin/env escript
+%% -*- erlang -*-
+%%! -noinput +B
+-mode(compile).
+
+-define(GA_SECRET, "gaSecret").
+-define(SSH_PUBLIC_KEY, "sshPublicKey").
+
+
+conf() ->    
+    F = escript:script_name(),
+    Dir = filename:dirname(F),    
+    Conf = filename:join([Dir, "ldap-util.conf"]),
+    {ok, KVs} = file:consult(Conf),
+    put(base_dn, proplists:get_value(base_dn, KVs)),
+    %% io:format("~p~n", [KVs]),
+    KVs.
+
+
+main([Op|Rest]) ->
+    Conf = conf(),
+    {ok, Handle} = eldap:open([proplists:get_value(host, Conf)]),
+    ok = eldap:simple_bind(Handle, proplists:get_value(bind_dn, Conf), 
+                           proplists:get_value(passwd, Conf)),
+    case Op of
+        "user_add" ->
+            [Uid, UidNum, GidNum, SSHPubkey|_] = Rest,
+            user_add(Handle, Uid, UidNum, GidNum, SSHPubkey);
+        "user_del" ->
+            [Uid|_] = Rest,
+            user_del(Handle, Uid);
+        "user_change_ga_secret" ->
+            [Uid|_] = Rest,
+            user_change_ga_secret(Handle, Uid);
+        "user_add_pubkey" ->
+            [Uid, SSHPubkey|_] = Rest,
+            user_add_pubkey(Handle, Uid, SSHPubkey);
+        "user_del_pubkey" ->
+            [Uid|SSHPubkeys] = Rest,
+            user_del_pubkey(Handle, Uid, SSHPubkeys);
+        "group_add" ->
+            [GName, GidNum|_] = Rest,
+            group_add(Handle, GName, GidNum);
+        "group_del" ->
+            [GName|_] = Rest,
+            group_del(Handle, GName);
+        "group_add_member" ->
+            [MemUid|GNames] = Rest,
+            group_add_member(Handle, MemUid, GNames);
+        "group_del_member" ->
+            [MemUid|GNames] = Rest,
+            group_del_member(Handle, MemUid, GNames);
+        _ ->
+            io:format("not support ~p", [Op])
+    end,                    
+    eldap:close(Handle).
+
+user_dn(Uid) ->
+    lists:concat(["uid=", Uid, ",ou=user,", get(base_dn)]).
+
+user_add(Handle, Uid, UidNum, GidNum, SSHPubkey) ->
+    DN = user_dn(Uid),
+    Home = lists:concat(["/home/", Uid]),
+    GASecret = ga_secret(),
+    CnList = lists:zipwith(fun(K, V) ->
+                                   lists:concat([K, "=", V])
+                           end, [?GA_SECRET, ?SSH_PUBLIC_KEY],
+                           [GASecret, SSHPubkey]),
+    io:format("GASecret ~s~n", [GASecret]),
+    Attributes = [{"objectClass", ["posixAccount", "top", "account"]},
+                  {"uid",[Uid]}, 
+                  {"uidNumber",[UidNum]}, {"gidNumber",[GidNum]}, 
+                  {"homeDirectory", [Home]}, {"loginShell", ["/bin/bash"]},
+                  {"cn", CnList}
+                 ],  
+    %% io:format("~p~n", [Attributes]),
+    Ret = eldap:add(Handle, DN, Attributes),
+    io:format("add ~p~n", [Ret]),
+    ok.
+
+ga_secret() ->
+    Set = {65,66,67,68,69,70,71,72,73,74,75,76,77,78,79,80,81,82,83,
+           84,85,86,87,88,89,90,50,51,52,53,54,55},
+    [element(rand:uniform(32), Set)|| _ <- lists:seq(1,16)].
+
+user_del(Handle, Uid) ->
+    DN = user_dn(Uid),
+    delete(Handle, DN).
+
+user_change_ga_secret(Handle, Uid) ->
+    DN = user_dn(Uid),
+    [GASecret] = cn_find(Handle, Uid, ?GA_SECRET),
+    NewGASecret = ga_secret(),
+    io:format("GASecret ~s~n", [NewGASecret]),
+    Ret = eldap:modify(Handle, DN,
+                       [eldap:mod_delete("cn", [lists:concat([?GA_SECRET, "=", GASecret])]),
+                        eldap:mod_add("cn", [lists:concat([?GA_SECRET, "=", NewGASecret])])]),
+    io:format("~p~n", [Ret]).
+
+user_add_pubkey(Handle, Uid, SSHPubkey) ->
+    DN = user_dn(Uid),
+    Ret = eldap:modify(Handle, DN,
+                       [eldap:mod_add("cn", [lists:concat([?SSH_PUBLIC_KEY, "=", SSHPubkey])])]),
+    io:format("~p~n", [Ret]).
+
+%% 传key，删除单个；不传，全部清空
+user_del_pubkey(Handle, Uid, SSHPubkeys0) ->
+    DN = user_dn(Uid),
+    case SSHPubkeys0 of
+        [] ->
+            SSHPubkeys = cn_find(Handle, Uid, ?SSH_PUBLIC_KEY);
+        SSHPubkeys ->
+            ignore
+    end,
+    Vs = [lists:concat([?SSH_PUBLIC_KEY, "=", SSHPubkey]) || SSHPubkey <- SSHPubkeys],
+    Ret = eldap:modify(Handle, DN,
+                       [eldap:mod_delete("cn", Vs)]),
+    io:format("~p~n", [Ret]).
+
+cn_find(Handle, Uid, Field) ->
+    Filter = eldap:'and'([eldap:equalityMatch("objectClass", "PosixAccount"), eldap:equalityMatch("uid", Uid)]),
+    {ok,{eldap_search_result,Entries,[]}} = eldap:search(Handle, [{base, get(base_dn)}, {filter, Filter}, {attributes, ["cn"]}]),
+    %% io:format("~p~n", [Entries]),
+    case Entries of
+        [{eldap_entry,_,[{"cn", Vs}]}] ->
+            Len = length(Field),
+            lists:foldl(fun(V, Acc) ->
+                                case lists:prefix(Field, V) of
+                                    true ->
+                                        [lists:nthtail(Len+1, V)|Acc];
+                                    false ->
+                                        Acc
+                                end
+                        end, [], Vs);
+        _ ->
+            []
+    end.
+
+
+group_dn(GName) ->
+    lists:concat(["cn=", GName, ",ou=group,", get(base_dn)]).
+    
+group_add(Handle, GName, GidNum) ->
+    DN = group_dn(GName),
+    Attributes = [{"objectClass", ["posixGroup", "top"]},
+                  {"gidNumber",[GidNum]}, 
+                  {"cn", [GName]}
+                 ],  
+    %% io:format("~p~n", [Attributes]),
+    Ret = eldap:add(Handle, DN, Attributes),
+    io:format("add ~p~n", [Ret]),
+    ok.
+
+group_del(Handle, GName) ->
+    DN = group_dn(GName),
+    delete(Handle, DN).
+
+delete(Handle, DN) ->
+    Ret = eldap:delete(Handle, DN),
+    io:format("delete ~p~n", [Ret]).
+
+
+group_add_member(Handle, MemUid, GNames) ->
+    [begin
+         DN = group_dn(GName),
+         Ret = eldap:modify(Handle, DN,
+                            [eldap:mod_add("memberUid", [MemUid])]),
+         io:format("~s add_mem ~p~n", [GName, Ret])
+     end || GName <- GNames].
+
+group_del_member(Handle, MemUid, GNames) ->
+    [begin
+         DN = group_dn(GName),
+         Ret = eldap:modify(Handle, DN,
+                            [eldap:mod_delete("memberUid", [MemUid])]),
+         io:format("~s del_mem ~p~n", [GName, Ret])
+     end || GName <- GNames].

@@ -1,0 +1,20 @@
+#!/bin/bash
+BASE_DN='dc=example,dc=com'
+MANAGER_DN='cn=Manager,dc=example,dc=com'
+cat << EOF > /tmp/ldap-init-data
+dn: $BASE_DN
+objectclass: organization
+objectclass: dcObject
+dc: example
+o: example
+
+dn: ou=user,$BASE_DN
+objectclass: OrganizationalUnit
+ou: user
+
+dn: ou=group,$BASE_DN
+objectclass: OrganizationalUnit
+ou: group
+EOF
+
+ldapadd -x -D $MANAGER_DN -W -f /tmp/ldap-init-data

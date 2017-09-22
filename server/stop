@@ -1,0 +1,13 @@
+#!/bin/bash
+
+stop_slapd() {
+    local pid=$(pgrep slapd)
+    if [[ $pid = "" ]]; then
+        echo "slapd not running"
+    else
+        echo "stoping"
+        kill $pid
+    fi
+}
+
+stop_slapd

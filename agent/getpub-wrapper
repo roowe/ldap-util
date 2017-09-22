@@ -1,0 +1,14 @@
+#!/bin/bash
+if [ -z "$HOME" ]; then
+    export HOME=/nonexistent/
+fi
+
+export PATH="/opt/otp/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games"
+uid=$1
+ga_file=/sshd/google_authenticator/$uid
+[ -f $ga_file ] && rm $ga_file
+GASecret=`/sshd/ldap/getcn gaSecret $uid`
+echo -e "$GASecret\n\" TOTP_AUTH" > $ga_file
+chmod 400 $ga_file
+/sshd/ldap/getcn sshPublicKey $uid
+

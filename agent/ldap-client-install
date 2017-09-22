@@ -1,0 +1,30 @@
+#!/bin/bash  
+
+#--------------------------------------------------------------------------------  
+LDAP_SERVER_IP="172.16.32.2"
+BASE_DN='dc=example,dc=com'  
+#--------------------------------------------------------------------------------  
+  
+#创建preseed文件-软件安装自应答  
+echo > debconf-ldap-preseed.txt  
+echo "ldap-auth-config    ldap-auth-config/ldapns/ldap-server    string    ldap://$LDAP_SERVER_IP" >> debconf-ldap-preseed.txt  
+echo "ldap-auth-config    ldap-auth-config/ldapns/base-dn    string    $BASE_DN" >> debconf-ldap-preseed.txt  
+echo "ldap-auth-config    ldap-auth-config/ldapns/ldap_version    select    3" >> debconf-ldap-preseed.txt  
+echo "ldap-auth-config    ldap-auth-config/dbrootlogin    boolean    false" >> debconf-ldap-preseed.txt  
+echo "ldap-auth-config    ldap-auth-config/dblogin    boolean    false" >> debconf-ldap-preseed.txt  
+echo "nslcd   nslcd/ldap-uris string  ldap://$LDAP_SERVER_IP" >> debconf-ldap-preseed.txt  
+echo "nslcd   nslcd/ldap-base string  $BASE_DN" >> debconf-ldap-preseed.txt  
+  
+cat debconf-ldap-preseed.txt | debconf-set-selections  
+  
+#安装ldap client相关软件  
+apt-get install -y ldap-utils libpam-ldap libnss-ldap nslcd  
+apt-get install -y python-ldap
+#认证方式中添加ldap  
+auth-client-config -t nss -p lac_ldap  
+  
+#认证登录后自动创建用户homedir目录  
+echo "session required pam_mkhomedir.so skel=/etc/skel umask=0022" >> /etc/pam.d/common-session  
+  
+#自启动服务  
+update-rc.d nslcd enable  
